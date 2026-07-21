@@ -147,7 +147,7 @@
                 </button>
                 <label id="import-project-label" class="bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs px-3 py-2 border border-stone-400 transition-colors cursor-pointer">
                     Import Backup
-                    <input type="file" id="project-import-input" accept=".json" onchange="importDataFromJSONFile(event)" class="hidden">
+                    <input type="file" id="project-import-input" accept=".json,.zip" onchange="importDataFromJSONFile(event)" class="hidden">
                 </label>
                 
                 <label id="mass-upload-label" class="bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs px-3 py-2 border border-stone-400 transition-colors cursor-pointer hidden">
@@ -349,7 +349,7 @@
             updateLiveSIDisplay(inquiryValue);
         }
 
-        // Shared pipeline function to run image scaling and compression
+        // Shared pipeline function: WebP format + 850px bound to fit ~250 images in one 25MB email limit
         function compressSingleImageBlob(fileBlob) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -359,8 +359,8 @@
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
                         
-                        const MAX_WIDTH = 1200;
-                        const MAX_HEIGHT = 1200;
+                        const MAX_WIDTH = 850;
+                        const MAX_HEIGHT = 850;
                         let width = img.width;
                         let height = img.height;
 
@@ -378,9 +378,12 @@
 
                         canvas.width = width;
                         canvas.height = height;
+
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
                         ctx.drawImage(img, 0, 0, width, height);
                         
-                        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+                        const compressedBase64 = canvas.toDataURL('image/webp', 0.58);
                         resolve(compressedBase64);
                     };
                     img.src = eventResult.target.result;
@@ -419,7 +422,6 @@
             const chosenFiles = Array.from(event.target.files);
             if (chosenFiles.length === 0) return;
 
-        
             // Dynamically calculate the safe tail-end of your sequential index list
             const activeSlotsCount = Object.keys(currentFolder.items).filter(k => k.startsWith('slot-')).length;
             let nextEmptySlotNum = activeSlotsCount + 1;
@@ -467,42 +469,42 @@
         }
 
         async function handleMassDeleteAllArtworks() {
-                const currentFolder = appData.folders.find(f => f.id === currentOpenFolderId);
-                if (!currentFolder) return;
+            const currentFolder = appData.folders.find(f => f.id === currentOpenFolderId);
+            if (!currentFolder) return;
 
-                const totalItems = Object.keys(currentFolder.items).filter(key => key.startsWith('slot-')).length;
-                if (totalItems === 0) {
-                    alert("This folder is already empty!");
-                    return;
+            const totalItems = Object.keys(currentFolder.items).filter(key => key.startsWith('slot-')).length;
+            if (totalItems === 0) {
+                alert("This folder is already empty!");
+                return;
+            }
+
+            if (!confirm(`Are you absolutely sure you want to permanently delete all ${totalItems} artworks inside this folder? This action cannot be undone.`)) {
+                return;
+            }
+
+            alert("Purging all folder assets from local storage... Please wait.");
+
+            // Loop through and clear out images from localforage database
+            for (const slotKey of Object.keys(currentFolder.items)) {
+                if (slotKey.startsWith('slot-')) {
+                    const imageStoreKey = `${currentOpenFolderId}_${slotKey}`;
+                    await localforage.removeItem(imageStoreKey);
                 }
+            }
 
-                if (!confirm(`Are you absolutely sure you want to permanently delete all ${totalItems} artworks inside this folder? This action cannot be undone.`)) {
-                    return;
-                }
+            // Reset the items object back to empty
+            currentFolder.items = {};
 
-                alert("Purging all folder assets from local storage... Please wait.");
-
-                // Loop through and clear out images from localforage database
-                for (const slotKey of Object.keys(currentFolder.items)) {
-                    if (slotKey.startsWith('slot-')) {
-                        const imageStoreKey = `${currentOpenFolderId}_${slotKey}`;
-                        await localforage.removeItem(imageStoreKey);
-                    }
-                }
-
-                // Reset the items object back to empty
-                currentFolder.items = {};
-
-                saveAllStateData();
-                renderFileSystemViewCanvas();
-                alert("Folder successfully wiped!");
+            saveAllStateData();
+            renderFileSystemViewCanvas();
+            alert("Folder successfully wiped!");
         }
 
         let isExporting = false;
 
         async function exportDataToJSONFile() {
             isExporting = true; 
-            alert("Compiling portfolio details and embedded local image assets into your project backup file... Please wait.");
+            alert("Compiling portfolio details and embedded image assets into a compressed ZIP backup file... Please wait.");
 
             try {
                 const exportBundle = JSON.parse(JSON.stringify(appData));
@@ -520,18 +522,26 @@
                     }
                 }
 
-                const jsonBlob = new Blob([JSON.stringify(exportBundle)], { type: "application/json" });
-                const blobUrl = URL.createObjectURL(jsonBlob);
+                const jsonString = JSON.stringify(exportBundle);
 
+                // Compress JSON into a ZIP file container using JSZip
+                const zip = new JSZip();
+                zip.file(`ap_art_backup_${Date.now()}.json`, jsonString);
+                
+                const zipContent = await zip.generateAsync({
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: { level: 9 }
+                });
+
+                const blobUrl = URL.createObjectURL(zipContent);
                 const downloadAnchor = document.createElement('a');
                 downloadAnchor.setAttribute("href", blobUrl);
-                downloadAnchor.setAttribute("download", `ap_art_helper_full_backup_${Date.now()}.json`);
+                downloadAnchor.setAttribute("download", `ap_art_helper_backup_${Date.now()}.zip`);
                 document.body.appendChild(downloadAnchor);
                 downloadAnchor.click();
                 downloadAnchor.remove();
 
-                // Free the memory the blob URL was holding onto, after giving the browser
-                // a moment to actually kick off the download/share sheet.
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
 
             } catch (err) {
@@ -542,52 +552,71 @@
             }
         }
 
-        function importDataFromJSONFile(event) {
+        async function importDataFromJSONFile(event) {
             const selectedFile = event.target.files[0];
             if (!selectedFile) return;
 
-            const fileReaderInstance = new FileReader();
-            fileReaderInstance.onload = async function(e) {
-                try {
-                    const parsedProjectData = JSON.parse(e.target.result);
-                    if (!parsedProjectData || !parsedProjectData.folders) {
-                        throw new Error("Invalid format");
+            try {
+                let jsonTextContent = "";
+
+                // Check if uploaded file is a ZIP archive
+                if (selectedFile.name.endsWith('.zip') || selectedFile.type.includes('zip')) {
+                    const zip = new JSZip();
+                    const unzippedArchive = await zip.loadAsync(selectedFile);
+                    
+                    const jsonFileName = Object.keys(unzippedArchive.files).find(fileName => fileName.endsWith('.json'));
+                    if (!jsonFileName) {
+                        throw new Error("No project JSON file found inside this ZIP archive.");
                     }
 
-                    if (!confirm("Import backup file? This will replace your current workspace layout and re-insert image binaries.")) {
-                        return;
-                    }
+                    jsonTextContent = await unzippedArchive.files[jsonFileName].async("string");
+                } else {
+                    // Read uncompressed legacy JSON file
+                    jsonTextContent = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsText(selectedFile);
+                    });
+                }
 
-                    alert("Processing bundle and writing image streams back to local database shelf...");
+                const parsedProjectData = JSON.parse(jsonTextContent);
+                if (!parsedProjectData || !parsedProjectData.folders) {
+                    throw new Error("Invalid project file format.");
+                }
 
-                    for (let folder of parsedProjectData.folders) {
-                        for (let slotKey of Object.keys(folder.items)) {
-                            const item = folder.items[slotKey];
-                            const imageStoreKey = `${folder.id}_${slotKey}`;
+                if (!confirm("Import backup file? This will replace your current workspace layout and re-insert image binaries.")) {
+                    return;
+                }
 
-                            if (item && item.embeddedExportImageRaw) {
-                                await localforage.setItem(imageStoreKey, item.embeddedExportImageRaw);
-                                delete item.embeddedExportImageRaw;
-                            }
+                alert("Processing bundle and writing image streams back to local database shelf...");
+
+                for (let folder of parsedProjectData.folders) {
+                    for (let slotKey of Object.keys(folder.items)) {
+                        const item = folder.items[slotKey];
+                        const imageStoreKey = `${folder.id}_${slotKey}`;
+
+                        if (item && item.embeddedExportImageRaw) {
+                            await localforage.setItem(imageStoreKey, item.embeddedExportImageRaw);
+                            delete item.embeddedExportImageRaw;
                         }
                     }
-
-                    appData = parsedProjectData;
-                    
-                    saveAllStateData();
-                    syncInvestigationUI();
-                    renderFileSystemViewCanvas();
-                    
-                    alert("Import successful! Workspace configuration and graphics successfully restored.");
-
-                } catch (err) { 
-                    console.error("Import Error: ", err);
-                    alert("Invalid backup project format or file corruption encountered."); 
-                } finally {
-                    event.target.value = '';
                 }
-            };
-            fileReaderInstance.readAsText(selectedFile);
+
+                appData = parsedProjectData;
+                
+                saveAllStateData();
+                syncInvestigationUI();
+                renderFileSystemViewCanvas();
+                
+                alert("Import successful! Workspace configuration and graphics successfully restored.");
+
+            } catch (err) { 
+                console.error("Import Error: ", err);
+                alert(`Import failed: ${err.message || "Invalid or corrupted backup file."}`); 
+            } finally {
+                event.target.value = '';
+            }
         }
 
         function clearAttachedImage(event) {
@@ -780,7 +809,7 @@
             const addFolderBtn = document.getElementById('add-folder-action-btn');
             const addArtBtn = document.getElementById('add-artwork-action-btn');
             const massUploadBtn = document.getElementById('mass-upload-label');
-            const massDeleteBtn = document.getElementById('mass-delete-btn'); // Add this line
+            const massDeleteBtn = document.getElementById('mass-delete-btn');
 
             if (!canvas) return;
             canvas.innerHTML = '';
@@ -896,7 +925,6 @@
 
                 const placeholderCard = document.createElement('div');
 
-                
                 placeholderCard.className = 'border-2 border-stone-900 bg-white shadow-[4px_4px_0px_#260808] flex flex-col h-80 relative';
                 placeholderCard.innerHTML = `
                     <div class="flex-1 flex flex-col items-center justify-center text-center p-4 border-2 border-dashed border-stone-300 m-2 bg-stone-50/50 hover:bg-stone-50 transition-colors cursor-pointer" onclick="openArtModalInstance(${nextEmptyNum})">
