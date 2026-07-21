@@ -520,13 +520,19 @@
                     }
                 }
 
-                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportBundle));
+                const jsonBlob = new Blob([JSON.stringify(exportBundle)], { type: "application/json" });
+                const blobUrl = URL.createObjectURL(jsonBlob);
+
                 const downloadAnchor = document.createElement('a');
-                downloadAnchor.setAttribute("href", dataStr);
+                downloadAnchor.setAttribute("href", blobUrl);
                 downloadAnchor.setAttribute("download", `ap_art_helper_full_backup_${Date.now()}.json`);
                 document.body.appendChild(downloadAnchor);
                 downloadAnchor.click();
                 downloadAnchor.remove();
+
+                // Free the memory the blob URL was holding onto, after giving the browser
+                // a moment to actually kick off the download/share sheet.
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
 
             } catch (err) {
                 console.error("Export Error: ", err);
