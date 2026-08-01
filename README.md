@@ -1,20 +1,9 @@
 Welcome to Simple Tools By Pri
 
 These tools were created to help myself with specific tasks I needed to do in my daily life. 
-They are web apps specifically made for desktop:
+They are web apps specifically made for desktop. These are hosted on Github Pages. 
+To access the site, copy and past this link into your browser: https://priyagoyal03.github.io/simple-tools-by-pri/
 
-**Future Plans:**
-
-General
-- Create a navigation bar
-- Create a more modern UI
-- Make images stored locally instead of being hosted on URLs
-- Make images formatted cleanly
-
-App Ideas:
-- Room Cleaning Tool
-- Habit Tracker
-- Goal Organizer
 -------------------------------------------------------------------------------------------
 
 **LaundryDash:**
@@ -39,3 +28,17 @@ What: Place to store art when you need a tool to connect across all devices
 Features: Import from Photo Library, Export as zip, import from zip, ability to input art metadata, image compression
 Created With: Visual Studio Code - Used AI to generate code to compress images. 
 Future Plans: Not Much other than fixing bugs.
+
+------------------------------------------------------------------------------------------------
+**Future Plans:**
+
+General
+- Create a navigation bar
+- Create a more modern UI
+- Make images stored locally instead of being hosted on URLs
+- Make images formatted cleanly
+
+App Ideas:
+- Room Cleaning Tool
+- Habit Tracker
+- Goal Organizer
